@@ -171,7 +171,109 @@ class SweepParams:
         for combo in self.swp_combo_iter():
             yield {k: v for k, v in zip(self._swp_var_list, combo)}
 
+class DataDesigner(DesignerBase, abc.ABC):
+    """A streamlined DesignerBase module created to generate data intelligently.
 
+    1. dsn_swp_params: Compromised of List[Dict]. Each [Dict] contains:
+        a) path: Yaml hierarchy [List]
+        b) swp_settings: Start, stop, num. of sweep points [Dict]
+        c) active: Whether sweep should be performed [Bool]
+        d) interpolation: Method of interpolating to form data point. Check class fxns for options. [Str]
+    """
+    
+    def __init__(self, root_dir: Path, sim_db: SimulationDB, dsn_specs: Mapping[str, Any]) -> None:
+        self._out_dir = self.get_out_dir(sim_db, root_dir)
+        self.dsn_swp = None
+        super().__init__(root_dir, sim_db, dsn_specs)
+        
+    @classmethod
+    def _parse_param_from_path (cls, param_path: Union[str, Path]) -> Param:
+        """
+        :param param_path: Pathlike argument
+        :returns: Param class
+        """
+        if isinstance(param_path, (str, Path)):
+            params = read_yaml(str(param_path))
+        else:
+            raise ValueError("Need pathlike object (string or path).")
+        return Param(params)
+
+    # Class properties
+    @property
+    def dut_class(self) -> Union[Type[Module], Type[TemplateBase]]:
+        """Return DUT Class"""
+        return self._dut_class
+
+    # Helper methods
+    @abc.abstractmethod
+    def get_dut_sch_class(self) -> Type[Module]:
+        """Returns the default generator class"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def get_dut_lay_class(self) -> Type[TemplateBase]:
+        """Returns the default layout class"""
+        raise NotImplementedError
+
+
+    def get_dut_class_info(self, gen_specs: Param) -> Tuple[Union[Type[Module], Type[TemplateBase]], bool]:
+        """Returns information about the DUT generator class.
+        :param gen_specs: 
+        :returns: The 
+
+
+        Parameters
+        ----------
+        gen_specs : Param
+            The generator specs.
+
+        Returns
+        -------
+        dut_class : Union[Type[Module], Type[TemplateBase]]
+            The DUT generator class.
+
+        is_lay : bool
+            True if the DUT generator is a layout generator, False if schematic generator.
+        """
+        # Get default generator classes (in case no DUT class is found)
+        try:
+            sch_cls = self.get_dut_sch_class().get_qualified_name()
+        except NotImplementedError:
+            sch_cls = None
+        try:
+            lay_cls = self.get_dut_lay_class().get_qualified_name()
+        except NotImplementedError:
+            lay_cls = None
+
+        if 'dut_class' in gen_specs:
+            dut_cls = import_class(gen_specs['dut_class'])
+            if issubclass(dut_cls, Module):
+                is_lay = False
+            elif issubclass(dut_cls, TemplateBase):
+                is_lay = True
+            else:
+                raise ValueError(f"Invalid generator class {dut_cls.get_qualified_name()}")
+        elif 'lay_class' in gen_specs:
+            dut_cls = import_class(gen_specs['lay_class'])
+            if not issubclass(dut_cls, TemplateBase):
+                raise ValueError(f"Invalid layout generator class {dut_cls}")
+            is_lay = True
+        elif 'sch_class' in gen_specs:
+            dut_cls = import_class(gen_specs['sch_class'])
+            if not issubclass(dut_cls, Module):
+                raise ValueError(f"Incorrect schematic generator class {dut_cls}")
+            is_lay = False
+        elif lay_cls is not None:
+            is_lay = True
+            dut_cls = lay_cls
+        elif sch_cls is not None:
+            is_lay = False
+            dut_cls = sch_cls
+        else:
+            raise ValueError("Either schematic or layout class must be specified")
+        return dut_cls, is_lay
+
+        
 class OptDesigner(DesignerBase, abc.ABC):
     """A design script class that attempts to find a globally optimal design via a characterization database.
 
